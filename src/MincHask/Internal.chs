@@ -107,7 +107,7 @@ cGetRealHyperslab ::
   Volume ->
   [Int] -> -- ^ starts
   [Int] -> -- ^ counts
-  io [Double]
+  io (Ptr Double)
 
 cGetRealHyperslab v st co =
   if length st /= length co
@@ -120,13 +120,13 @@ cGetRealHyperslab v st co =
       buf <- mallocArray (product co)
       res <- {#call miget_real_value_hyperslab #}
              v ty starr coarr (castPtr buf)
-      slab <- peekArray (product co) buf
-      free buf
+      --slab <- peekArray (product co) buf
+      --free buf
       free starr
       free coarr
       if res == -1
         then throw HyperslabReadError
-        else liftIO (return slab)
+        else liftIO (return buf)
 
 
 cFreeDimension ::
