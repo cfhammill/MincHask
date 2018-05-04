@@ -13,8 +13,8 @@ data VolStruct
 data VolumeList
 
 {# pointer *mivolprops as VolumeProps -> VolProps #}
-{# pointer *mivolume as Volume -> VolStruct #}
-{# pointer *midimension as Dimension -> DimStruct #}
+{# pointer *mivolume as Volume -> VolStruct  #}
+{# pointer *midimension as Dimension #} -- -> DimStruct #}
 {# pointer *midimhandle_t as DimArray -> Dimension #}
 --{# pointer *void as VolumeListPtr -> VolumeList #}
 

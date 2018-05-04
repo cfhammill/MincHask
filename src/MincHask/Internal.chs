@@ -4,8 +4,6 @@ module MincHask.Internal (cOpenVolume
                          , cGetDimensions
                          , cGetDimensionSizes
                          , cGetRealHyperslab
-                         , cFreeDimension
-                         , cFreeDimArray
                          , cCloseVolume
                          )
 where 
@@ -76,7 +74,7 @@ cGetDimensions v dc da dor n =
     liftIO $ do
       darr <- mallocArray n
       res <- {#call miget_volume_dimensions#} v' dc' da' dor' n' darr
-      if res /= 0
+      if res == -1
         then throw DimensionOpenError
         else return darr
 
@@ -91,7 +89,7 @@ cGetDimensionSizes ::
 cGetDimensionSizes n da = liftIO $ do
   sarr <- mallocArray n
   res <- {#call miget_dimension_sizes#} da (fromIntegral n) sarr
-  sl <- peekArray 3 sarr
+  sl <- peekArray n sarr
   free sarr
   if res == -1
     then throw DimensionReadError
@@ -117,7 +115,7 @@ cGetRealHyperslab v st co =
       starr <- listToPtr (fmap fromIntegral st)
       coarr <- listToPtr (fmap fromIntegral co)
       ty <- return (fromIntegral (fromEnum MiTypeDouble))
-      buf <- mallocArray (product co)
+      buf <- mallocArray (product co)      
       res <- {#call miget_real_value_hyperslab #}
              v ty starr coarr (castPtr buf)
       --slab <- peekArray (product co) buf
@@ -128,19 +126,18 @@ cGetRealHyperslab v st co =
         then throw HyperslabReadError
         else liftIO (return buf)
 
+-- cFreeDimension ::
+--   (MonadIO io) =>
+--   Dimension -> io Int
+-- cFreeDimension d = liftIO $ do
+--   res <- {#call mifree_dimension_handle #} d
+--   return (fromIntegral res)
 
-cFreeDimension ::
-  (MonadIO io) =>
-  Dimension -> io Int
-cFreeDimension d = liftIO $ do
-  res <- {#call mifree_dimension_handle #} d
-  return (fromIntegral res)
-
-cFreeDimArray ::
-  (MonadIO io) => Int -> DimArray -> io [Int]
-cFreeDimArray n da = liftIO $ do
-  dims <- peekArray n da
-  sequence (fmap cFreeDimension dims)
+-- cFreeDimArray ::
+--   (MonadIO io) => Int -> DimArray -> io [Int]
+-- cFreeDimArray n da = liftIO $ do
+--   dims <- peekArray n da
+--   sequence (fmap cFreeDimension dims)
 
 cCloseVolume :: (MonadIO io) => Volume -> io Int
 cCloseVolume v = liftIO $ do
