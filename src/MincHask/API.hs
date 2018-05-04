@@ -1,13 +1,18 @@
+{-# LANGUAGE FlexibleContexts          #-}
+
 module MincHask.API (withVolume
                     , openVolume
-                    , withDimensions
+                    , getVolumeSizes                 
                     , getDimensions
                     , getDimensionSizes
                     , getHyperslabList
-                    , getHyperslab
+                    , getHyperslabRepa
+                    , getHyperslabAccelerate
+                    , readVolume
                     )
 where
 
+import Prelude as P
 import MincHask.Internal
 import MincHask.Types
 import Data.Text hiding (length, reverse)
@@ -17,8 +22,14 @@ import Foreign.Marshal.Alloc (free)
 import Foreign.Marshal.Array (peekArray)
 import Foreign.Storable (peekElemOff)
 import Data.Vector.Unboxed hiding (product, reverse)
-import Data.Array.Repa.Repr.Unboxed (Array, U, fromUnboxed)
-import Data.Array.Repa.Shape (Shape, listOfShape)
+import qualified Data.Array.Repa.Repr.Unboxed as R (Array, U, fromUnboxed)
+import qualified Data.Array.Repa.Eval as R (Load)
+import qualified Data.Array.Repa.Repr.Delayed as R (D, delay)
+import Data.Array.Repa.Shape (Shape, listOfShape, shapeOfList)
+
+import qualified Data.Array.Accelerate as A hiding (reverse, replicate)
+import Data.Array.Accelerate.IO
+
 
 withVolume :: (MonadIO io, MonadMask io) =>
   Text -> Int -> (Volume -> io a) -> io a
@@ -28,27 +39,15 @@ openVolume :: Text -> Int -> Managed Volume
 openVolume f op = 
   managed (withVolume f op)
 
-withDimensions ::
-  (MonadIO io, MonadMask io) =>
-  Volume ->
-  DimClass ->
-  MiDimattr ->
-  DimOrder ->
-  Int ->
-  (DimArray -> io a) ->
-  io a
-withDimensions v dc da dor n =
-  bracket (cGetDimensions v dc da dor n) (cFreeDimArray n)
-
 getDimensions ::
+  (MonadThrow io, MonadIO io) =>
   Volume ->
   DimClass ->
   MiDimattr ->
   DimOrder ->
   Int ->
-  Managed DimArray
-getDimensions v dc da dor n =
-  managed (withDimensions v dc da dor n)
+  io DimArray
+getDimensions = cGetDimensions
 
 getDimensionSizes :: Int -> DimArray -> IO [Int]
 getDimensionSizes n da = 
@@ -56,25 +55,51 @@ getDimensionSizes n da =
   
 
 getVolumeSizes :: Text -> Int -> IO [Int]
-getVolumeSizes file n =
-  let dims = do
-        vol <- openVolume file n
-        getDimensions vol MiDimclassAny 0 MiDimorderFile n
-  in
-    with dims (getDimensionSizes n)
+getVolumeSizes file n = 
+  with (openVolume file 1) $ \vol ->
+  do
+    dims <- liftIO $ getDimensions vol MiDimclassAny 0 MiDimorderFile n
+    liftIO $ getDimensionSizes n dims
     
 getHyperslabList :: Volume -> [Int] -> [Int] ->  IO [Double]
 getHyperslabList v st co = 
   bracket (cGetRealHyperslab v st co) free $ peekArray (product co)
 
-getHyperslab ::
+getHyperslabRepa ::
   (Shape s) =>
-  Volume -> s -> s -> IO (Array U s Double)
-getHyperslab v st co =
+  Volume -> s -> s -> IO (R.Array R.U s Double)
+getHyperslabRepa v st co =
   bracket (cGetRealHyperslab v stl col) free $ \buf ->
    do
      vec <- generateM (product col) (peekElemOff buf)
-     return (fromUnboxed co vec)
+     return (R.fromUnboxed co vec)
      where
        stl = reverse (listOfShape st)
        col = reverse (listOfShape co)
+
+
+getHyperslabAccelerate ::
+  (Shapes r a, Shape r) =>
+  Volume ->
+  r ->
+  r ->
+  IO (A.Array a Double)
+getHyperslabAccelerate v st co =
+  fromRepa <$>
+  (computeAccP =<<
+  (fmap R.delay $ getHyperslabRepa v st co))
+
+
+readVolume ::
+  (Shapes r sh) =>
+  Text ->
+  Int ->
+  IO (A.Array sh Double)
+readVolume file n = do
+  sizes <- getVolumeSizes file n
+  with (openVolume file 1) $
+    \vol ->
+      getHyperslabAccelerate
+      vol
+      (shapeOfList (P.replicate n 0))
+      (shapeOfList (P.reverse sizes))
